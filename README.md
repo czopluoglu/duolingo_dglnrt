@@ -1,4 +1,4 @@
-# # Extended Deterministic Gated Lognormal Response Time Model to Simultaneously Identify Compromised Items and Examinees with Item Preknowledge Using Response Time Data
+# Enhanced Deterministic Gated Item Response Model to Simultaneously Identify Compromised Items and Examinees with Item Preknowledge Using Response Accuracy Data
 
 **Acknowledgement**
 
@@ -22,7 +22,7 @@ For a tutorial-style introduction to the analyses conducted in the paper, please
 
     - R Script for fitting the model in Stan and extracting model parameters, and evaluating the model performance
 
-    - The Stan model syntax (dglnrt.stan) and its compiled version by the cmdstanr package.
+    - The Stan model syntax (dgirt.stan) and its compiled version for the cmdstanr package.
   
 3. **/docs/**:
    
