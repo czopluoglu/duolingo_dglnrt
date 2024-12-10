@@ -612,15 +612,6 @@ stanfit <- rstan::read_stan_csv(fit$output_files())
 
 Ensuring model convergence is essential to verify the reliability of posterior estimates. This section outlines the evaluation of convergence diagnostics for different types of parameters in the model. The analysis follows the robust workflow detailed in Michael Betancourt's [Robust Statistical Worflow with RStan](https://betanalpha.github.io/assets/case_studies/rstan_workflow.html).
 
-Code: Extracting and Filtering Parameter Summaries
-The following steps are performed to extract model summaries, categorize parameters, and filter for specific parameter types (e.g., pC, pH, person, item).
-
-Evaluating the convergence of the model is a critical step in ensuring the reliability of the posterior estimates. This section examines convergence diagnostics for different parameter types.
-
-A primary source in terms of how to evaluate model convergence is provided in this link, and this section follows the robust worflow suggested in this link.
-
-https://betanalpha.github.io/assets/case_studies/rstan_workflow.html
-
 ```{r, eval=TRUE,echo=TRUE}
 # Extract model summary with 95% credible intervals
 model_summary <- as.data.frame(
@@ -675,8 +666,8 @@ ggplot(model_summary, aes(x = n_eff)) +
   geom_histogram(fill = "blue", color = "black", alpha = 0.7) +
   facet_wrap(~type, scales = "free_y",nrow=2) +
   labs(
-    title = "Distribution of R-hat Values by Parameter Type",
-    x = "R-hat",
+    title = "Distribution of ESS Values by Parameter Type",
+    x = "ESS",
     y = "Frequency"
   ) +
   theme_minimal()
@@ -896,7 +887,7 @@ datatable(
 
 ## Interpreting P(C=1) and evaluating predictive performance in detecting compromised items
 
-Two groups of items were clearly separated by the probability estimates ofbeing compromised. The probabilities ranged from 0.14 to 0.58 with a mean of 0.30 and standard deviation of 0.12 for uncompromised items (group1 = 0), and ranged from 0.46 to 0.84 with a mean of 0.70 and standard deviation of 0.094 for compromised items (group1 = 1).
+Two groups of items were clearly separated by the probability estimates of being compromised. The probabilities ranged from 0.14 to 0.58 with a mean of 0.30 and standard deviation of 0.12 for uncompromised items (group1 = 0), and ranged from 0.46 to 0.84 with a mean of 0.70 and standard deviation of 0.094 for compromised items (group1 = 1).
 
 ```{r, eval=TRUE,echo=TRUE}
 # Retrive the true item compromise status
@@ -954,7 +945,7 @@ datatable(
   colnames = c(
     "Posterior Mean", "Posterior SD", "2.5%","9.75%","ESS","Rhat"
   ),
-  caption = "Time Intensity Parameter Estimates"
+  caption = "Probability Estimates of Items Being Compromised"
 )%>%
   formatStyle(
     columns = 1:ncol(tab),   # Select all columns to style
@@ -976,37 +967,36 @@ datatable(
 Two groups of examinees were clearly separated by the probability estimates of examinees having item preknowledge, indicating that model successfully picked up the signal in the simulated dataset. The probabilities ranged from 0.27 to 0.78 with a mean of 0.47 and standard deviation of 0.10 for honest simulees (group1 = 0), and ranged from 0.42 to 0.89 with a mean of 0.72 and standard deviation of 0.12 for dishonest simulees (group1 = 1).
 
 ```{r, eval=TRUE,echo=TRUE}
-
-T <- as.numeric(summary(stanfit, pars = c("pH"), probs = c(0.025, 0.975))$summary[,1])
-
-psych::describeBy(T,d_wide$group,mat=TRUE)[,c('group1','n','mean','sd','min','max')]
-
-plot(density(T[d_wide$group==0]),xlim=c(0,1),main="",ylim = c(0,5))
-points(density(T[d_wide$group==1]),lty=2,type='l')
+  pH <- as.numeric(summary(stanfit, pars = c("pH"), probs = c(0.025, 0.975))$summary[,1])
+  
+  psych::describeBy(pH,d_wide$group,mat=TRUE)[,c('group1','n','mean','sd','min','max')]
+  
+  plot(density(pH[d_wide$group==0]),xlim=c(0,1),main="",ylim = c(0,8))
+  points(density(pH[d_wide$group==1]),lty=2,type='l')  
 ```
 
 As a numerical measure, the Area Under the Curve (AUC) was 0.935, indicating strong separation between groups with and without item preknowledge by the probability estimates. Sensitivity and specificity values at various thresholds demonstrate effective separation, with sensitivity remaining high (above 90%) for thresholds up to 0.54, while specificity improves progressively, exceeding 95% at thresholds of 0.66 and higher. 
 
 ```{r, eval=TRUE,echo=TRUE}
 
-auc(d_wide$group,T)
-
-roc_analysis <- roc(response = d_wide$group,
-                    predictor = T)
-
-plot(1-roc_analysis$specificities,
-     roc_analysis$sensitivities,
-     xlim = c(0,1),ylim=c(0,1),
-     xlab = 'False Positive Rate (1-Specificity)',
-     ylab = 'True Positive Rate (Sensitivity)',
-     type='l')
-
-my_thresholds <- seq(from=0.5,to=0.8,by=0.01)
-
-coords(roc_analysis, 
-       my_thresholds, 
-       input="threshold", 
-       ret=c("threshold","specificity", "sensitivity"))
+  auc(d_wide$group,pH)
+  
+  roc_analysis <- roc(response = d_wide$group,
+                      predictor = pH)
+  
+  plot(1-roc_analysis$specificities,
+       roc_analysis$sensitivities,
+       xlim = c(0,1),ylim=c(0,1),
+       xlab = 'False Positive Rate (1-Specificity)',
+       ylab = 'True Positive Rate (Sensitivity)',
+       type='l')
+  
+  my_thresholds <- seq(from=0.5,to=0.8,by=0.01)
+  
+  coords(roc_analysis, 
+         my_thresholds, 
+         input="threshold", 
+         ret=c("threshold","specificity", "sensitivity"))
 
 ```
 
@@ -1022,7 +1012,7 @@ datatable(
   colnames = c(
     "Posterior Mean", "Posterior SD", "2.5%","9.75%","ESS","Rhat"
   ),
-  caption = "Time Intensity Parameter Estimates"
+  caption = "Probability Estimates of Examinees Having Item Preknowledge"
 )%>%
   formatStyle(
     columns = 1:ncol(tab),   # Select all columns to style
