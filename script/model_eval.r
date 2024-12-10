@@ -2,12 +2,6 @@ require(cmdstanr)
 require(rstan)
 require(psych)
 ################################################################################
-# Estimation Time 
-
-get_elapsed_time(stanfit)
-
-(sum(get_elapsed_time(stanfit))/4)/3600
-################################################################################
 
 # Overview of the item parameters
 
@@ -24,19 +18,32 @@ View(summary(stanfit, pars = c("person"), probs = c(0.025, 0.975))$summary)
 
 tau <- summary(stanfit, pars = c("person"), probs = c(0.025, 0.975))$summary
 tau <- matrix(tau[,1],ncol=2,byrow=TRUE)
-describe(tau)
+psych::describe(tau)
 
 # Overview of the probability of an examinee having item preknowledge
 
 View(summary(stanfit, pars = c("pH"), probs = c(0.025, 0.975))$summary)
 
-T <- as.numeric(summary(stanfit, pars = c("pH"), probs = c(0.025, 0.975))$summary[,1])
-hist(T)
+pH <- as.numeric(summary(stanfit, pars = c("pH"), probs = c(0.025, 0.975))$summary[,1])
+head(pH)
 
-auc(d_wide$group,T)
+describeBy(pH,d_wide$group,mat=TRUE)[,c('group1','n','mean','sd','min','max')]
+
+plot(density(pH[d_wide$group==0]),xlim=c(0,1),main="",ylim = c(0,5))
+points(density(pH[d_wide$group==1]),lty=2,type='l')
+
+
+auc(d_wide$group,pH)
 
 roc_analysis <- roc(response = d_wide$group,
-                    predictor = T)
+                    predictor = pH)
+
+plot(1-roc_analysis$specificities,
+     roc_analysis$sensitivities,
+     xlim = c(0,1),ylim=c(0,1),
+     xlab = 'False Positive Rate (1-Specificity)',
+     ylab = 'True Positive Rate (Sensitivity)',
+     type='l')
 
 my_thresholds <- seq(from=0.5,to=0.8,by=0.01)
 
@@ -57,13 +64,18 @@ for(kk in 1:50){
   C_vec[kk] = unique(d_long[d_long$Item==kk,]$compromised)
 }
 
-C_ <- as.numeric(summary(stanfit, pars = c("pC"), probs = c(0.025, 0.975))$summary[,1])
-hist(C_)
+pC <- as.numeric(summary(stanfit, pars = c("pC"), probs = c(0.025, 0.975))$summary[,1])
 
-auc(C_vec,C_)
+describeBy(pC,C_vec,mat=TRUE)[,c('group1','n','mean','sd','min','max')]
+
+plot(density(pC[C_vec==0]),xlim=c(0,1),main="",ylim = c(0,5))
+points(density(pC[C_vec==1]),lty=2,type='l')
+
+
+auc(C_vec,pC)
 
 roc_analysis <- roc(response = C_vec,
-                    predictor = C_)
+                    predictor = pC)
 
 my_thresholds <- seq(from=0.5,to=0.8,by=0.01)
 
