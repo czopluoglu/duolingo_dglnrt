@@ -2,9 +2,9 @@ data{
   int <lower=1> J;                       // number of examinees          
   int <lower=1> I;                       // number of items
   int <lower=1> n_obs;                   // number of observations (I xJ - missing responses)
-  int <lower=1> p_loc[n_obs];            // person indicator   
-  int <lower=1> i_loc[n_obs];            // item indicator
-  real Y[n_obs];                         // vector of log of responses
+  array[n_obs] int<lower=1> p_loc;       // person indicator   
+  array[n_obs] int<lower=1> i_loc;       // item indicator
+  array[n_obs] real Y;                   // vector of log of responses
 }
 
 parameters {
@@ -25,7 +25,7 @@ parameters {
   
   vector<lower=0,upper=1>[J] pH; // vector of length I for the probability of examinee item peknowledge 
   
-  ordered[2] person[J];          // an array with length I for person specific latent parameters
+  array[J] ordered[2] person;    // an array with length I for person specific latent parameters
   // Each array has two elements
   // first element is tau_t
   // second element is tau_c
@@ -34,7 +34,7 @@ parameters {
   // multiple chains do not go east and west leading multi-modal posteriors
   
   
-  vector[2] item[I];    // an array with length J for item specific parameters
+  array[I] vector[2] item;    // an array with length J for item specific parameters
   // each array has two elements
   // first element is alpha
   // second element is beta

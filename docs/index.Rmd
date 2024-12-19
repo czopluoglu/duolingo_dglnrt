@@ -61,13 +61,14 @@ options(scipen=99)
 
 <font color="black">
 
+
 ```{r, eval=TRUE,echo=FALSE}
-require(rstan)
+require(cmdstanr)
+fit <- readRDS(here("./no_upload/model_fit.RDS"))
 
-load(here("no_upload/model_fit.RData"))
 
-rt.long <- d_long
-rt <- d_wide
+rt.long <- read.csv(here('./data/simdata_long.csv'))
+rt      <- read.csv(here('./data/simdata_wide.csv'))
 ```
 
 # Acknowledgement
@@ -193,9 +194,9 @@ data{
   int <lower=1> J;                       // number of examinees          
   int <lower=1> I;                       // number of items
   int <lower=1> n_obs;                   // number of observations (I xJ - missing responses)
-  int <lower=1> p_loc[n_obs];            // person indicator   
-  int <lower=1> i_loc[n_obs];            // item indicator
-  real Y[n_obs];                         // vector of log of responses
+  array[n_obs] int<lower=1> p_loc;       // person indicator   
+  array[n_obs] int<lower=1> i_loc;       // item indicator
+  array[n_obs] real Y;                   // vector of log of responses
 }
 ```
 
@@ -220,7 +221,7 @@ parameters {
   
   vector<lower=0,upper=1>[J] pH; // vector of length I for the probability of examinee item peknowledge 
   
-  ordered[2] person[J];          // an array with length I for person specific latent parameters
+  array[J] ordered[2] person;    // an array with length I for person specific latent parameters
   // Each array has two elements
   // first element is tau_t
   // second element is tau_c
@@ -229,7 +230,7 @@ parameters {
   // multiple chains do not go east and west leading multi-modal posteriors
   
   
-  vector[2] item[I];    // an array with length J for item specific parameters
+  array[I] vector[2] item;    // an array with length J for item specific parameters
   // each array has two elements
   // first element is alpha
   // second element is beta
@@ -267,7 +268,7 @@ transformed parameters{
 }
 ```
 
-In the **parameters block**, I use `ordered[2] person[I]` to define the array for person-specific parameters instead of a simple `vector[2] person[I]`. The ordered type in Stan ensures that the elements of the vector are ordered, with the first element being smaller than the second. Specifically, in this case, it enforces that $\tau_c > \tau_t$ for every individual. 
+In the **parameters block**, I use `array[J] ordered[2] person` to define the array for person-specific parameters instead of a simple `vector[2] person[J]`. The ordered type in Stan ensures that the elements of the vector are ordered, with the first element being smaller than the second. Specifically, in this case, it enforces that $\tau_c > \tau_t$ for every individual. 
 This constraint has a crucial role in resolving potential issues with the posterior distributions. Without this enforced order, the model was prone to multi-modal posterior distributions. This problem arose because different Markov Chain Monte Carlo (MCMC) chains would explore inconsistent parameter directions. Some chains might converge on one mode, while others diverged to an alternative mode in the opposite direction, leading to incoherent results and difficulties in interpretation. Below provides an example of this issue without enforcing this order.
 
 ![Non-mixing chains](stan1.png)
@@ -316,10 +317,10 @@ model{
       // log of probability densities for each combination of two discrete parameters
       // (C,T) = {(0,0),(0,1),(1,0),(1,1)}
       
-      real lprt1 = log1m(pC[i_loc[i]]) + log1m(pH[p_loc[i]]) + normal_lpdf(Y[i] | p_t, 1/exp(item[i_loc[i],1]));  // H = 0, C=0
-      real lprt2 = log1m(pC[i_loc[i]]) + log(pH[p_loc[i]])   + normal_lpdf(Y[i] | p_t, 1/exp(item[i_loc[i],1]));  // H = 1, C=0
-      real lprt3 = log(pC[i_loc[i]])   + log1m(pH[p_loc[i]]) + normal_lpdf(Y[i] | p_t, 1/exp(item[i_loc[i],1]));  // H = 0, C=1
-      real lprt4 = log(pC[i_loc[i]])   + log(pH[p_loc[i]])   + normal_lpdf(Y[i] | p_c, 1/exp(item[i_loc[i],1]));  // H = 1, C=1 
+      real lprt1 = log1m(pC[i_loc[i]]) + log1m(pH[p_loc[i]]) + normal_lpdf(Y[i] | p_t, 1/exp(item[i_loc[i],1]));  // T = 0, C=0
+      real lprt2 = log1m(pC[i_loc[i]]) + log(pH[p_loc[i]])   + normal_lpdf(Y[i] | p_t, 1/exp(item[i_loc[i],1]));  // T = 1, C=0
+      real lprt3 = log(pC[i_loc[i]])   + log1m(pH[p_loc[i]]) + normal_lpdf(Y[i] | p_t, 1/exp(item[i_loc[i],1]));  // T = 0, C=1
+      real lprt4 = log(pC[i_loc[i]])   + log(pH[p_loc[i]])   + normal_lpdf(Y[i] | p_c, 1/exp(item[i_loc[i],1]));  // T = 1, C=1 
       
       target += log_sum_exp([lprt1, lprt2, lprt3, lprt4]);
   }
@@ -552,60 +553,88 @@ datatable(
 
 The first step is to structure the input data in a list format. This is required because Stan accepts data in a specific format for model fitting. Each element in the list corresponds to a variable used in the Stan model.
 
-```{r, eval=FALSE,echo=FALSE}
-
+```{r, eval=FALSE,echo=TRUE}
 
 data_rt <- list(
-  I              = length(unique(rt.long$Item)),
-  J              = length(unique(rt.long$id)),
-  n_obs          = nrow(rt.long),
-  p_loc          = rt.long$id,
-  i_loc          = rt.long$Item,
-  Y              = log(rt.long$RT)
+  I              = length(unique(rt_long$Item)),
+  J              = length(unique(rt_long$id)),
+  n_obs          = nrow(rt_long),
+  p_loc          = rt_long$id,
+  i_loc          = rt_long$Item,
+  Y              = log(rt_long$RT)
 )
 
 ```
 
 Before fitting the model, the Stan syntax (.stan file) needs to be compiled into a format that can be executed. This step creates a cmdstan_model object.
 
-```{r, eval=FALSE,echo=FALSE}
+```{r, eval=FALSE,echo=TRUE}
 # Compile the model syntax
 
 mod <- cmdstan_model('./script/dglnrt.stan')
 ```
 
-The next step is to fit the model using the sample() method provided by cmdstanr. Key parameters include:
+## Single chain initialization
 
-- `data`: The prepared input data.
-- `seed`: A fixed random seed for reproducibility.
-- `chains`: Number of Markov Chains (e.g., 4).
-- `parallel_chains`: Number of chains to run in parallel.
-- `iter_warmup`: Number of warm-up iterations for each chain.
-- `iter_sampling`: Number of sampling iterations for each chain.
-- `adapt_delta`: Target acceptance rate for the Hamiltonian Monte Carlo sampler.
+In addition to the order constraints ($\tau_c > \tau_t$), discussed earlier, I am also employing a single chain initialization strategy as a complementary approach to further mitigate the risk of label switching. By initializing the parameters near plausible values within the vicinity of a single mode, this method helps stabilize the sampling process and reduces the likelihood of components switching labels during inference. While the order constraint enforces a structural restriction to break the symmetry of the mixture components, single chain initialization adds an extra layer of robustness by anchoring the chains to a specific mode early in the sampling process. Together, these strategies work in tandem to address the challenges posed by label switching, ensuring more reliable and interpretable posterior inferences. For more information, see [this link](https://mc-stan.org/docs/stan-users-guide/problematic-posteriors.html#hacks-as-fixes).
 
+The code below fits the model using a single chain and relatively fewer iterations. 
 
 ```{r, eval=FALSE,echo=TRUE}
-# Fit the model
+fit_init <- mod$sample(
+  data            = data_rt,
+  chains          = 1,
+  iter_warmup     = 150,
+  iter_sampling   = 150,
+  refresh         = 10,
+  adapt_delta     = 0.99)
+```
+
+Once we fit the model with a single chain, we extract the model parameters and we will feed these values as starting parameters in the next stage.
+
+## Multi-chain estimation
+
+The next step is to fit the model using multiple chains and more iterations. The code below first creates a list object for starting parameters based on the output from a single chain estimation. Then, we feed these values as starting values to each chain. We are fitting the model with four chains, and each chain has 1000 warmup iterations followed by 1000 sampling iterations.
+
+```{r, eval=FALSE,echo=TRUE}
+# a vector of initial time intensity and time discrimination parameters
+ipar <- matrix(fit_init$summary("item")$mean,ncol=2,byrow=FALSE) 
+rownames(ipar) <- NULL
+colnames(ipar) <- NULL
+
+# a two column matrix of initial tau parameters
+tau <- matrix(fit_init$summary("person")$mean,ncol=2,byrow=FALSE)
+rownames(tau) <- NULL
+colnames(tau) <- NULL
+
+# A vector of initial P(H=1) parameters, probability of an examinee having item preknowledge
+H <- as.vector(fit_init$summary("pH")$mean)
+
+# A vector of initial P(C=1) parameters, probability of an item being compromised
+C <- as.vector(fit_init$summary("pC")$mean)
+
+# Put the initial estimates together as a list
+start <- list(item   = ipar,
+              person = tau,
+              pH     = H,
+              pC     = C)
+```
+
+```{r, eval=FALSE,echo=TRUE}
 fit <- mod$sample(
   data            = data_rt,
   seed            = 1234,
   chains          = 4,
   parallel_chains = 4,
-  iter_warmup     = 1000,
+  iter_warmup     = 500,
   iter_sampling   = 1000,
   refresh         = 10,
+  init            = list(start,start,start,start),
   adapt_delta     = 0.99)
 
-# Compile the output files into an rstan object
-stanfit <- rstan::read_stan_csv(fit$output_files())
-```
+# Save the model object with all parameters for future use or backup
 
-After fitting the model, the output files are combined into an `rstan` object for further analysis or visualization.
-
-```{r, eval=FALSE,echo=TRUE}
-# Convert the CmdStan output to an rstan object
-stanfit <- rstan::read_stan_csv(fit$output_files())
+fit$save_object(file = './no_upload/model_fit.RDS')
 ```
 
 # Model Convergence
@@ -613,127 +642,115 @@ stanfit <- rstan::read_stan_csv(fit$output_files())
 Ensuring model convergence is essential to verify the reliability of posterior estimates. This section outlines the evaluation of convergence diagnostics for different types of parameters in the model. The analysis follows the robust workflow detailed in Michael Betancourt's [Robust Statistical Worflow with RStan](https://betanalpha.github.io/assets/case_studies/rstan_workflow.html).
 
 ```{r, eval=TRUE,echo=TRUE}
-# Extract model summary with 95% credible intervals
-model_summary <- as.data.frame(
-  summary(stanfit, probs = c(0.025, 0.975))$summary
-)
+# Extract model summary
+model_summary <- as.data.frame(fit$summary(variables = c("item",
+                                                         "person",
+                                                         "pC",
+                                                         "pH")))
 
 # Add a column for parameter types extracted from row names
-model_summary$type <- gsub("\\[.*$", "", row.names(model_summary))
-
-# Filter for person and item parameters of interest
-model_summary <- model_summary[model_summary$type%in%c('pC','pH','person','item'),]
+model_summary$type <- gsub("\\[.*$", "", model_summary$variable)
 
 head(model_summary)
 ```
 
-- The `summary()` function extracts posterior summaries from the fitted model. These include point estimates (e.g., mean) and 95% credible intervals.
+- The `summary()` function extracts posterior summaries from the fitted model.
 
 - The `gsub()` function removes index annotations (e.g., [1], [2,1]) from parameter names to group parameters by type.
 
-- The `type` column is used to filter the summary data for specific categories (pC, pH, person, and item).
-
-The `model_summary` can be used for further diagnostics
+The `model_summary` can be used for further diagnostics.
 
 ## Effective Sample Sizes
 
-The minimum size of **effective samples per iteration** is 0.067 for item parameters, 0.038 for person parameters, 0.146 for probability of item compromise (pC), and 0.445 for probability of having item preknowledge(pH). They are all far above the threshold 0.001, indicating no problem in terms of estimating the effective sample sizes.
+The minimum size of **effective samples per iteration** is 0.112 for item parameters, 0.120 for person parameters, 0.200 for probability of item compromise (pC), and 0.869 for probability of having item preknowledge(pH). They are all far above the threshold 0.001, indicating no problem in terms of estimating the effective sample sizes.
 
 ```{r, eval=TRUE,echo=TRUE}
-N    <- dim(model_summary)[[1]]
-iter <- dim(extract(stanfit)[[1]])[[1]]
-
-model_summary$n_eff_ratio <- ratio <- model_summary[,'n_eff'] / iter
-
+iter <- 4000    # number of chains x number of sampling iterations
+  
+model_summary$n_eff_ratio <- model_summary[,'ess_bulk'] / iter
+  
 psych::describeBy(model_summary$n_eff_ratio,
                   model_summary$type,
                   mat=TRUE)[,c('group1','min')]
-
 ```
 
 The summary of effective sample sizes by each parameter type is below.
 
 ```{r, eval=TRUE,echo=TRUE}
-psych::describeBy(model_summary$n_eff,
-                  model_summary$type,
-                  mat=TRUE)[,c('group1','mean','min','max')]
+  psych::describeBy(model_summary$ess_bulk,
+                    model_summary$type,
+                    mat=TRUE)[,c('group1','mean','min','max')]
 ``` 
 
 
 ```{r, eval=TRUE,echo=TRUE}
 # Create a histogram of ESS values grouped by parameter type
-ggplot(model_summary, aes(x = n_eff)) +
-  geom_histogram(fill = "blue", color = "black", alpha = 0.7) +
-  facet_wrap(~type, scales = "free_y",nrow=2) +
-  labs(
-    title = "Distribution of ESS Values by Parameter Type",
-    x = "ESS",
-    y = "Frequency"
-  ) +
-  theme_minimal()
+  ggplot(model_summary, aes(x = ess_bulk)) +
+    geom_histogram(fill = "blue", color = "black", alpha = 0.7) +
+    facet_wrap(~type, scales = "free_y",nrow=2) +
+    labs(
+      title = "Distribution of ESS Values by Parameter Type",
+      x = "R-hat",
+      y = "Frequency"
+    ) +
+    theme_minimal()
 ```
 
 ## Split Rhat summary by Parameter type
 
-`pH` parameter type demonstrates the best convergence, with a mean R-hat of 1.0003 and a very narrow range (minimum 0.9991, maximum 1.0059). Similarly, the `pC` parameter type has a mean R-hat of 1.0031, with values ranging between 1.0001 and 1.0104. Both of these parameter types exhibit excellent convergence, indicating robust estimation of probabilities for examinee preknowledge and item compromise status. The person parameters has a slightly higher mean R-hat (1.0047) and a broader range, with some values extending up to 1.0437. The item parameters also has a mean R-hat of 1.0049, with a range between 0.9993 and 1.0234. A total of 89.03% of all parameters have R-hat values below 1.01, and all R-hat values are below 1.05.
-
-Overall, the model demonstrates strong convergence across parameter types, particularly for `pC` and `pH`, which are critical for identifying compromised items and examinees with preknowledge. The slightly higher values in person and item parameters could probably be addressed by increasing sampling iterations. 
+All parameters exhibit excellent convergence with R-hat values equal or less than 1.01. The highest R-hat value observed is 1.01.
 
 ```{r, eval=TRUE,echo=TRUE}
 # Create a histogram of Rhat values grouped by parameter type
-ggplot(model_summary, aes(x = Rhat)) +
-  geom_histogram(binwidth = 0.002, fill = "blue", color = "black", alpha = 0.7) +
-  facet_wrap(~type, scales = "free_y",nrow=2) +
-  labs(
-    title = "Distribution of R-hat Values by Parameter Type",
-    x = "R-hat",
-    y = "Frequency"
-  ) +
-  theme_minimal()
-
-psych::describeBy(model_summary$Rhat,
-                  model_summary$type,
-                  mat=TRUE)[,c('group1','mean','min','max')]
-
-sum(model_summary$Rhat<1.01)/nrow(model_summary)
+ggplot(model_summary, aes(x = rhat)) +
+    geom_histogram(binwidth = 0.002, fill = "blue", color = "black", alpha = 0.7) +
+    facet_wrap(~type, scales = "free_y",nrow=2) +
+    labs(
+      title = "Distribution of R-hat Values by Parameter Type",
+      x = "R-hat",
+      y = "Frequency"
+    ) +
+    theme_minimal()
+  
+  psych::describeBy(model_summary$rhat,
+                    model_summary$type,
+                    mat=TRUE)[,c('group1','mean','min','max')]
+  
+  sum(model_summary$Rhat<1.01)/nrow(model_summary)
 ```
 
 ## Tree Depth
 
-The results of the tree depth analysis indicate that none of the 4,000 post-warmup iterations saturated the maximum tree depth of 10 (0%). The majority of iterations achieved a tree depth of 7 (96.6%), with a smaller number reaching a tree depth of 6 (3.4%). This suggests that the sampler operated efficiently and did not encounter issues related to trajectory length limits during the model fit. No further adjustment to the max_treedepth parameter is necessary.
+The results of the tree depth analysis indicate that none of the 4,000 post-warmup iterations saturated the maximum tree depth of 10 (0%). The majority of iterations achieved a tree depth of 7 (95.1%), with a smaller number reaching a tree depth of 6 (1.0%) and a tree depth of 8 (3.9%). This suggests that the sampler operated efficiently and did not encounter issues related to trajectory length limits during the model fit. No further adjustment to the max_treedepth parameter is necessary.
 
 ```{r, eval=TRUE,echo=TRUE}
+# Sampler diagnostics
+sampler_params <- posterior::as_draws_df(fit$sampler_diagnostics())
 
-max_depth = 10
-sampler_params <- get_sampler_params(stanfit, inc_warmup=FALSE)
-treedepths <- do.call(rbind, sampler_params)[,'treedepth__']
-table(treedepths)
-n = length(treedepths[sapply(treedepths, function(x) x == max_depth)])
-N = length(treedepths)
-100 * n / N
+# Tree depths across iterations
+table(sampler_params$treedepth__)
 ```
 
 ## E-BFMI
 
 The E-BFMI diagnostic results reveal potential inefficiencies in the exploration of the parameter space across the chains. Specifically:
 
-- Chain 1: E-BFMI = 0.1993 (slightly below the recommended threshold of 0.2)
-- Chain 2: E-BFMI = 0.1227 (significantly below the threshold)
-- Chain 3: E-BFMI = 0.0249 (well below the threshold)
-- Chain 4: E-BFMI = 0.1779 (slightly below the threshold)
+- Chain 1: E-BFMI = 0.1360 
+- Chain 2: E-BFMI = 0.1621 
+- Chain 3: E-BFMI = 0.1445 
+- Chain 4: E-BFMI = 0.1376 
 
-Chains 2 and 3 demonstrate particularly poor E-BFMI values, indicating that the Hamiltonian Monte Carlo sampler struggled to efficiently explore the posterior distribution. These low values suggest that the sampler experienced short transitions between trajectories, potentially slowing down exploration and reducing the reliability of the sampling process.
+All chains demonstrate particularly poor E-BFMI values, indicating that the Hamiltonian Monte Carlo sampler struggled to efficiently explore the posterior distribution. These low values suggest that the sampler experienced short transitions between trajectories, potentially slowing down exploration and reducing the reliability of the sampling process.
 
 ```{r, eval=TRUE,echo=TRUE}
-sampler_params <- get_sampler_params(stanfit, inc_warmup=FALSE)
 e_bfmi <- c()
-for (n in 1:length(sampler_params)) {
-  energies = sampler_params[n][[1]][,'energy__']
-  numer = sum(diff(energies)**2) / length(energies)
-  denom = var(energies)
-  e_bfmi[n] = numer / denom
-  print(sprintf('Chain %s: E-BFMI = %s', n, numer / denom))
-}
+  for (n in 1:4) {
+    energies = sampler_params[sampler_params$.chain==n,]$energy__
+    numer = sum(diff(energies)**2) / length(energies)
+    denom = var(energies)
+    e_bfmi[n] = numer / denom
+    print(sprintf('Chain %s: E-BFMI = %s', n, numer / denom))
+  }
 ```
 
 ## Divergences
@@ -741,11 +758,7 @@ for (n in 1:length(sampler_params)) {
 The divergence diagnostic for this model fit indicates no divergent transitions out of the total iterations (0%). This result suggests that the Hamiltonian Monte Carlo sampler explored the posterior distribution effectively, encountering no problematic regions or pathological neighborhoods.
 
 ```{r, eval=TRUE,echo=TRUE}
-sampler_params <- get_sampler_params(stanfit, inc_warmup=FALSE)
-divergent <- do.call(rbind, sampler_params)[,'divergent__']
-n = sum(divergent)
-N = length(divergent)
-100 * (n / N)
+100 * mean(sampler_params$divergent__)
 ```
 
 # Parameter Estimates
@@ -755,22 +768,21 @@ N = length(divergent)
 The true latent speed parameter estimates, $\tau_t$ has a mean close to zero with a small standard deviation (0.06), indicating minimal variability and a symmetric distribution (skew = -0.04, kurtosis = -0.04). The cheating latent speed parameter estimates, $\tau_c$, has a higher mean (0.35) and standard deviation (0.10).
 
 ```{r, eval=TRUE,echo=TRUE}
-tau <- summary(stanfit, pars = c("person"), probs = c(0.025, 0.975))$summary
-tau <- matrix(tau[,1],ncol=2,byrow=TRUE)
+tau <- matrix(fit$summary(variables = c("person"))$mean,
+                ncol=2,byrow=FALSE)
 psych::describe(tau)
 ```
 
 
 ```{r, eval=TRUE,echo=FALSE}
-tab <- round(summary(stanfit, pars = c("person"), probs = c(0.025, 0.975))$summary[,-2],2)
-tab <- tab[seq(1,1000,2),]
+tab <- fit$summary(variables = c("person"))[,c(-3,-5,-10)]
 datatable(
-  tab,
+  tab[1:500,],
   options = list(
     pageLength = 10,
     autoWidth = FALSE),
   colnames = c(
-    "Posterior Mean", "Posterior SD", "2.5%","9.75%","ESS","Rhat"
+    "Parameter","Posterior Mean", "Posterior SD", "5%","95%","Rhat","ESS"
   ),
   caption = "True Latent Speed Parameter Estimates"
 )%>%
@@ -780,25 +792,23 @@ datatable(
     `text-align` = "center"  # Center horizontally
   ) %>%
     formatRound(
-    columns = c(1,2,3,4,6), # Format all numeric columns except ESS (column 6)
+    columns = c(2,3,4,5,6), # Format all numeric columns except ESS (column 6)
     digits = 2                  # Round to two decimals
   ) %>%
   formatRound(
-    columns = 5,               # Format ESS column
+    columns = 7,               # Format ESS column
     digits = 0                 # Round to no decimals
   )
 ```
 
 ```{r, eval=TRUE,echo=FALSE}
-tab <- round(summary(stanfit, pars = c("person"), probs = c(0.025, 0.975))$summary[,-2],2)
-tab <- tab[seq(2,1000,2),]
 datatable(
-  tab,
+  tab[501:1000,],
   options = list(
     pageLength = 10,
     autoWidth = FALSE),
   colnames = c(
-    "Posterior Mean", "Posterior SD", "2.5%","9.75%","ESS","Rhat"
+    "Parameter","Posterior Mean", "Posterior SD", "5%","95%","Rhat","ESS"
   ),
   caption = "Cheating Latent Speed Parameter Estimates"
 )%>%
@@ -807,12 +817,12 @@ datatable(
     `vertical-align` = "middle", # Center vertically
     `text-align` = "center"  # Center horizontally
   ) %>%
-  formatRound(
-    columns = c(1,2,3,4,6), # Format all numeric columns except ESS (column 6)
+    formatRound(
+    columns = c(2,3,4,5,6), # Format all numeric columns except ESS (column 6)
     digits = 2                  # Round to two decimals
   ) %>%
   formatRound(
-    columns = 5,               # Format ESS column
+    columns = 7,               # Format ESS column
     digits = 0                 # Round to no decimals
   )
 ```
@@ -822,23 +832,23 @@ datatable(
 The log of time discrimination parameter estimates, $ln(\alpha_t)$, has a mean of 0.53 with a standard deviation of 0.25, and the time intensity parameter estimates has a mean (3.59) and standard deviation of 0.30.
 
 ```{r, eval=TRUE,echo=TRUE}
-ipar <- summary(stanfit, pars = c("item"), probs = c(0.025, 0.975))$summary
-ipar <- matrix(ipar[,1],ncol=2,byrow=TRUE) 
+ipar <- matrix(fit$summary(variables = c("item"))$mean,
+              ncol=2,byrow=FALSE)
 
 psych::describe(ipar)
 ```
 
 
 ```{r, eval=TRUE,echo=FALSE}
-tab <- round(summary(stanfit, pars = c("item"), probs = c(0.025, 0.975))$summary[,-2],2)
-tab <- tab[seq(1,100,2),]
+tab <- fit$summary(variables = c("item"))[,c(-3,-5,-10)]
+
 datatable(
-  tab,
+  tab[1:50,],
   options = list(
     pageLength = 10,
     autoWidth = FALSE),
   colnames = c(
-    "Posterior Mean", "Posterior SD", "2.5%","9.75%","ESS","Rhat"
+    "Parameter","Posterior Mean", "Posterior SD", "5%","95%","Rhat","ESS"
   ),
   caption = "Log of Time Discrimination Parameter Estimates"
 )%>%
@@ -848,25 +858,23 @@ datatable(
     `text-align` = "center"  # Center horizontally
   ) %>%
     formatRound(
-    columns = c(1,2,3,4,6), # Format all numeric columns except ESS (column 6)
+    columns = c(2,3,4,5,6), # Format all numeric columns except ESS (column 6)
     digits = 2                  # Round to two decimals
   ) %>%
   formatRound(
-    columns = 5,               # Format ESS column
+    columns = 7,               # Format ESS column
     digits = 0                 # Round to no decimals
   )
 ```
 
 ```{r, eval=TRUE,echo=FALSE}
-tab <- round(summary(stanfit, pars = c("item"), probs = c(0.025, 0.975))$summary[,-2],2)
-tab <- tab[seq(2,100,2),]
 datatable(
-  tab,
+  tab[51:100,],
   options = list(
     pageLength = 10,
     autoWidth = FALSE),
   colnames = c(
-    "Posterior Mean", "Posterior SD", "2.5%","9.75%","ESS","Rhat"
+    "Parameter","Posterior Mean", "Posterior SD", "5%","95%","Rhat","ESS"
   ),
   caption = "Time Intensity Parameter Estimates"
 )%>%
@@ -876,11 +884,11 @@ datatable(
     `text-align` = "center"  # Center horizontally
   ) %>%
     formatRound(
-    columns = c(1,2,3,4,6), # Format all numeric columns except ESS (column 6)
+    columns = c(2,3,4,5,6), # Format all numeric columns except ESS (column 6)
     digits = 2                  # Round to two decimals
   ) %>%
   formatRound(
-    columns = 5,               # Format ESS column
+    columns = 7,               # Format ESS column
     digits = 0                 # Round to no decimals
   )
 ```
@@ -896,15 +904,14 @@ Two groups of items were clearly separated by the probability estimates of being
 C_vec <- c()
 
 for(kk in 1:50){
-  C_vec[kk] = unique(d_long[d_long$Item==kk,]$compromised)
+  C_vec[kk] = unique(rt.long[rt.long$Item==kk,]$compromised)
 }
 
-
-pC <- as.numeric(summary(stanfit, pars = c("pC"), probs = c(0.025, 0.975))$summary[,1])
+pC <- fit$summary(variables = c("pC"))$mean
 
 psych::describeBy(pC,C_vec,mat=TRUE)[,c('group1','n','mean','sd','min','max')]
 
-plot(density(pC[C_vec==0]),xlim=c(0,1),main="",ylim = c(0,5))
+plot(density(pC[C_vec==0]),xlim=c(0,1),main="",ylim = c(0,8))
 points(density(pC[C_vec==1]),lty=2,type='l')
 ```
 
@@ -935,7 +942,7 @@ coords(roc_analysis,
 ```
 
 ```{r, eval=TRUE,echo=FALSE}
-tab <- round(summary(stanfit, pars = c("pC"), probs = c(0.025, 0.975))$summary[,-2],2)
+tab <- fit$summary(variables = c("pC"))[,c(-3,-5,-10)]
 
 datatable(
   tab,
@@ -943,7 +950,7 @@ datatable(
     pageLength = 10,
     autoWidth = FALSE),
   colnames = c(
-    "Posterior Mean", "Posterior SD", "2.5%","9.75%","ESS","Rhat"
+    "Parameter","Posterior Mean", "Posterior SD", "5%","95%","Rhat","ESS"
   ),
   caption = "Probability Estimates of Items Being Compromised"
 )%>%
@@ -953,35 +960,35 @@ datatable(
     `text-align` = "center"  # Center horizontally
   ) %>%
     formatRound(
-    columns = c(1,2,3,4,6), # Format all numeric columns except ESS (column 6)
+    columns = c(2,3,4,5,6), # Format all numeric columns except ESS (column 6)
     digits = 2                  # Round to two decimals
   ) %>%
   formatRound(
-    columns = 5,               # Format ESS column
+    columns = 7,               # Format ESS column
     digits = 0                 # Round to no decimals
   )
 ```
 
 ## Interpreting P(H=1) and evaluating predictive performance in detecting simulees with item preknowledge
 
-Two groups of examinees were clearly separated by the probability estimates of examinees having item preknowledge, indicating that model successfully picked up the signal in the simulated dataset. The probabilities ranged from 0.27 to 0.78 with a mean of 0.47 and standard deviation of 0.10 for honest simulees (group1 = 0), and ranged from 0.42 to 0.89 with a mean of 0.72 and standard deviation of 0.12 for dishonest simulees (group1 = 1).
+Two groups of examinees were clearly separated by the probability estimates of examinees having item preknowledge, indicating that model successfully picked up the signal in the simulated dataset. The probabilities ranged from 0.25 to 0.78 with a mean of 0.47 and standard deviation of 0.10 for honest simulees (group1 = 0), and ranged from 0.42 to 0.89 with a mean of 0.72 and standard deviation of 0.12 for dishonest simulees (group1 = 1).
 
 ```{r, eval=TRUE,echo=TRUE}
-  pH <- as.numeric(summary(stanfit, pars = c("pH"), probs = c(0.025, 0.975))$summary[,1])
-  
-  psych::describeBy(pH,d_wide$group,mat=TRUE)[,c('group1','n','mean','sd','min','max')]
-  
-  plot(density(pH[d_wide$group==0]),xlim=c(0,1),main="",ylim = c(0,8))
-  points(density(pH[d_wide$group==1]),lty=2,type='l')  
+pH <- fit$summary(variables = c("pH"))$mean
+
+psych::describeBy(pH,rt$group,mat=TRUE)[,c('group1','n','mean','sd','min','max')]
+
+plot(density(pH[rt$group==0]),xlim=c(0,1),main="",ylim = c(0,8))
+points(density(pH[rt$group==1]),lty=2,type='l')
 ```
 
-As a numerical measure, the Area Under the Curve (AUC) was 0.935, indicating strong separation between groups with and without item preknowledge by the probability estimates. Sensitivity and specificity values at various thresholds demonstrate effective separation, with sensitivity remaining high (above 90%) for thresholds up to 0.54, while specificity improves progressively, exceeding 95% at thresholds of 0.66 and higher. 
+As a numerical measure, the Area Under the Curve (AUC) was 0.937, indicating strong separation between groups with and without item preknowledge by the probability estimates. 
 
 ```{r, eval=TRUE,echo=TRUE}
 
-  auc(d_wide$group,pH)
+  auc(rt$group,pH)
   
-  roc_analysis <- roc(response = d_wide$group,
+  roc_analysis <- roc(response = rt$group,
                       predictor = pH)
   
   plot(1-roc_analysis$specificities,
@@ -1002,7 +1009,7 @@ As a numerical measure, the Area Under the Curve (AUC) was 0.935, indicating str
 
 
 ```{r, eval=TRUE,echo=FALSE}
-tab <- round(summary(stanfit, pars = c("pH"), probs = c(0.025, 0.975))$summary[,-2],2)
+tab <- fit$summary(variables = c("pH"))[,c(-3,-5,-10)]
 
 datatable(
   tab,
@@ -1010,7 +1017,7 @@ datatable(
     pageLength = 10,
     autoWidth = FALSE),
   colnames = c(
-    "Posterior Mean", "Posterior SD", "2.5%","9.75%","ESS","Rhat"
+    "Parameter","Posterior Mean", "Posterior SD", "5%","95%","Rhat","ESS"
   ),
   caption = "Probability Estimates of Examinees Having Item Preknowledge"
 )%>%
@@ -1020,11 +1027,11 @@ datatable(
     `text-align` = "center"  # Center horizontally
   ) %>%
     formatRound(
-    columns = c(1,2,3,4,6), # Format all numeric columns except ESS (column 6)
+    columns = c(2,3,4,5,6), # Format all numeric columns except ESS (column 6)
     digits = 2                  # Round to two decimals
   ) %>%
   formatRound(
-    columns = 5,               # Format ESS column
+    columns = 7,               # Format ESS column
     digits = 0                 # Round to no decimals
   )
 ```
